@@ -1,9 +1,9 @@
-# Kaggriculture Agent：动态经济模拟中的研究与验证笔记
+# Kaggriculture Agent 工作笔记：动态经济模拟
 
 **范围：** Kaggle Kaggriculture 双人农场经营竞赛  
 **最终归档代码：** 提交 56720623，main.py  
 **赛果观察日期：** 2026-10-19  
-**定位：** 方法与证据记录，不是冠军攻略或完整最优解
+**文档类型：** 工作笔记
 
 ## 摘要
 
@@ -11,7 +11,7 @@
 
 工作区保存了多个公开策略的组合版本、规则核对、逐局回放账本、候选对比和在线提交记录。最终公开的代码选用最后一个有正向对照证据的提交 56720623。这个版本保留原有生产策略，只在可观测布局高度相似、资金充足且模拟收益达到阈值时，调整已有小麦或肥料购买单与固定价种子单的相对顺序。它改善的是一个局部执行瓶颈，不是生产结构上的突破。
 
-Kaggle CLI 当前显示该提交 COMPLETE，public score 1662.0、private score 4279.6；竞赛列表显示账户 rank 1695 / 10148。分数和名次只描述该次竞赛的平台结果，不能外推到不同对手池，也不能单独证明某个代码改动造成了全部提升。
+Kaggle CLI 当前显示该提交 COMPLETE，public score 1662.0、private score 4279.6。分数只描述该次竞赛的平台结果，不能外推到不同对手池，也不能单独证明某个代码改动造成了全部变化。
 
 ## 1. 比赛是什么
 
@@ -123,7 +123,6 @@ Kaggle 在线 rating 受匹配池、对手策略和赛程影响；早期分数�
 ## 7. 复现信息与参考
 
 - 比赛主页：[Kaggle Kaggriculture](https://www.kaggle.com/competitions/kaggriculture)
-- 本归档参考：[JED / AAS Benchmark Notes](https://github.com/FinalSunFlower/jed-aas-benchmark-notes)
 - 公开策略来源：[Thomas Tschinkel public state-router](https://www.kaggle.com/code/thomastschinkel/kaggriculture-93-8-win-rate-public-state-router?scriptVersionId=347936183)、[Yusuke Hayashi Shop Router](https://www.kaggle.com/code/yhay81/shop-router-0913)
 - 游戏执行环境：kaggle-environments 1.32.7
 - 源文件 SHA-256：4bb6df2f8bb0e15c1c8e6666dca9102d47c6180c7f6c9407f6b1dd979a1ea5d3
