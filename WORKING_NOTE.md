@@ -1,131 +1,145 @@
-# Kaggriculture Agent 工作笔记：动态经济模拟
+# Kaggriculture Agent Working Note: Dynamic Economic Simulation
 
-**范围：** Kaggle Kaggriculture 双人农场经营竞赛  
-**最终归档代码：** 提交 56720623，main.py  
-**赛果观察日期：** 2026-10-19  
-**文档类型：** 工作笔记
+**Language:** [English](WORKING_NOTE.md) | [简体中文](WORKING_NOTE.zh-CN.md)
+**Scope:** Kaggle Kaggriculture two-player farming competition
+**Archived agent:** Kaggle submission `56720623`, [`main.py`](main.py)
+**Score snapshot:** 2026-10-19
+**Document type:** Working note
 
-## 摘要
+## Abstract
 
-这项工作围绕一个 720 回合的双人经营模拟展开：agent 根据每回合观察安排农场工人、作物、牲畜、库存和市场订单。难点不在于找到单个高价作物，而在于把资本投入、生产周期、劳动动作、补给、库存和共享价格变化放进同一条现金流中，并在对手与随机商店组合变化时维持稳定。
+This note records the development and validation of one agent for a 720-step, two-player farming and market simulation. At each step, an agent schedules farmers and workers, crops, livestock, inventory transfers, and ordered market transactions. The central difficulty is not selecting a single high-price crop. It is coordinating capital, production lead time, labor actions, maintenance inputs, storage, and a shared price process while the opponent and shop mix vary.
 
-工作区保存了多个公开策略的组合版本、规则核对、逐局回放账本、候选对比和在线提交记录。最终公开的代码选用最后一个有正向对照证据的提交 56720623。这个版本保留原有生产策略，只在可观测布局高度相似、资金充足且模拟收益达到阈值时，调整已有小麦或肥料购买单与固定价种子单的相对顺序。它改善的是一个局部执行瓶颈，不是生产结构上的突破。
+The final public artifact is one complete Python agent. It preserves the existing production policy and adds a narrowly gated purchase-order timing layer. When the visible farm layout is sufficiently similar, cash is adequate, and the simulated advantage clears a threshold, the layer may reorder already-selected wheat or fertilizer purchases relative to a fixed-price seed order. This targets a local market-execution bottleneck; it is not a replacement production planner.
 
-Kaggle CLI 当前显示该提交 COMPLETE，public score 1662.0、private score 4279.6。分数只描述该次竞赛的平台结果，不能外推到不同对手池，也不能单独证明某个代码改动造成了全部变化。
+The recorded Kaggle result for submission `56720623` is public score `1662.0` and private score `4279.6`, with status `COMPLETE`. These values are platform observations for one competition snapshot. They are not a general estimate against arbitrary opponents and do not isolate the causal effect of any single code change.
 
-## 1. 比赛是什么
+## 1. Task and Environment
 
-Kaggriculture 是一个回合制、多智能体的农场经营模拟。默认赛季为 30 天，每天 24 个回合，共 720 步。每步 agent 为农夫和已雇佣工人提交动作，并可提交有序市场订单。农场从一块土地和有限现金起步，可以购买土地、种子、动物、投入品和劳动力，再通过种植、喂养、浇水、收获、搬运和出售获得现金。
+Kaggriculture is a turn-based, multi-agent farm-management simulation. A default season has 30 days with 24 steps per day, for 720 steps. Each step supplies an observation and accepts actions for the farmer and hired workers, together with ordered market orders. A farm starts with limited land and cash. It can purchase land, seeds, animals, inputs, and labor, then earn cash through planting, feeding, watering, harvesting, hauling, and selling.
 
-这类题目同时考察策略与系统工程：
+The task combines strategy and systems engineering:
 
-- **有限时域经济决策：** 投资要在剩余赛季内回本，早期现金保留与生产扩张之间存在取舍。
-- **空间与动作预算：** 土地、工人数量、移动路径、仓储和每回合订单上限都会限制可实现产能。
-- **动态共享市场：** 两方销售共同改变市场库存和价格；商店按随机抽取的组合持续消耗指定商品。
-- **隐藏与公开状态并存：** 双方农场和部分市场信息可见，但对手库存不是完全可见；计划只能依据实际可观察量。
-- **随机世界与竞赛评价：** 商店和匹配对象变化，单个种子或单局现金差不能代表整体强度。
+- **Finite-horizon economics:** an investment must recover within the remaining season; early cash preservation competes with expansion.
+- **Spatial and action budgets:** land, worker count, movement, storage, and per-step order limits constrain realized capacity.
+- **Shared dynamic market:** both players change market inventory and prices; shops create continuing demand for randomly selected products.
+- **Partial observability:** farm and market fields are visible in different degrees, while opponent inventory is not fully observable.
+- **Stochastic evaluation:** shop configurations and opponents vary, so one seed or one final-cash difference is not a complete strength estimate.
 
-具体行动、生命周期和价格公式应以当前比赛规则与对应版本的公开引擎代码为准。不要只读旧 notebook 的策略注释：比赛机制、评估口径和当前对手分布可能变化。
+The active rules and engine version are authoritative. Older notebooks can become stale when action order, lifecycle details, pricing, or evaluation changes.
 
-## 2. 研究过程
+## 2. Research Questions
 
-### 先把环境变成可检查的模型
+The work focused on three questions:
 
-首先核对 agent 输入输出、每回合执行顺序、作物生长与衰减、动物维护、工人雇佣成本、仓库容量、市场订单上限、市场价格更新和商店需求。几个容易影响策略的细节包括：
+1. Which economic and execution rules determine whether a production plan is feasible rather than merely profitable on paper?
+2. When production assets are already similar, can market-order timing remove a repeatable execution loss without changing the plan?
+3. How can a candidate be separated into strategy evidence, replay evidence, and packaging evidence before submission?
 
-- 新种植作物的当天已计入缺水计数；错过维护可能很快让投资归零。
-- 动物需要持续投入小麦，忽略维护会失去动物，而不只是少收一轮产品。
-- 工人边际成本随当天雇佣数递增；“人更多”不等于“产出更多”。
-- 非种子库存受仓库容量限制，回合末溢出可能直接损失；搬运和出售也占动作或订单预算。
-- 同一回合的市场订单有顺序，且按两名玩家的订单交替处理；买入发生在不同位置可能面对不同报价。
-- 额外商店会改变持续需求，且重复抽中同一种商店是可能的。
+## 3. Method
 
-这些规则决定了什么才是可行策略。一个只看最终标价的静态收益表，会漏掉成长等待、喂养成本、运送动作、共享市场冲击和库存溢出。
+### 3.1 Turn the environment into a checkable model
 
-### 从轨迹中定位瓶颈
+The first pass checked agent input and output, step ordering, crop growth and decay, animal maintenance, worker cost, storage capacity, market order limits, price updates, and shop demand. Details with direct strategic impact included:
 
-研究过程保存了候选代码和官方环境完整对局。针对失败局，比较固定检查点上的现金、土地、工人、作物、牲畜和实际交易；对接近镜像的对局，再逐步重放市场账本，核对卖出时点、数量、价格和小麦采购成本。
+- A newly planted crop contributes to the same day's water deficit count; missed maintenance can erase the investment quickly.
+- Animals require continuing wheat input; maintenance failure can remove the animal rather than merely reduce one harvest.
+- Marginal worker cost increases with the number hired that day; more workers do not automatically mean more output.
+- Non-seed inventory is storage-limited; end-of-step overflow can be lost, while hauling and selling consume action or order budget.
+- Orders in one step are ordered and processed in alternating player positions; the same purchase can see a different quote at a different position.
+- Additional shops change persistent demand, and repeated shop types are possible.
 
-较大范围的回放抽样覆盖了不同排名区间的 230 场完整对局、29 个名次层级。另一个在线基线在一次记录快照中有 98 场完整比赛（42 胜、22 平、34 负）；针对该基线的失败和胜利轨迹，最终采购时序候选都做了反事实重放。样本有匹配偏差、对手池偏差和版本差异，因此这些计数用于提出问题与复核机制，不是随机抽样胜率估计。
+These rules make a static price table insufficient. A useful model must include growth delay, feed cost, movement, shared-market impact, and overflow risk.
 
-一个反复出现的分层是：
+### 3.2 Use trajectories as event ledgers
 
-1. **结构差距：** 土地、生产组合或前期扩张落后时，单独调整销售顺序通常无法补齐整季现金流。
-2. **执行差距：** 生产资产相近时，买入时点、市场订单队列、产品组合和最后几天的兑现可能改变小幅胜负。
-3. **运行差距：** 源码能否被 Kaggle 原始解析器载入、每步是否符合 schema、整局是否按时完成，必须单独验收。
+For complete official-environment games, the analysis compared cash, land, workers, crops, livestock, and realized transactions at fixed checkpoints. Near-mirror games were replayed step by step to verify sale timing, quantity, price, and wheat purchase cost rather than inferring causes from the final score alone.
 
-把这三类差异分开，比在同一个总分上同时调生产、市场和包装更容易得出可复核结论。
+A broader replay sample covered 230 complete games across 29 rank bands. A separate recorded online baseline contained 98 complete games: 42 wins, 22 draws, and 34 losses. The purchase-timing candidate was counterfactually replayed on the baseline's wins and losses. These samples contain matching, opponent-pool, and version bias; their counts are diagnostic evidence, not random-sample win-rate estimates.
 
-## 3. 选择的最终代码
+### 3.3 Separate three kinds of gap
 
-最终单文件是 [main.py](main.py)，它与已提交包中的源码字节一致。Kaggle 提交 56720623 为最后使用版本。代码本身是公开工作的整合结果，包含历史策略层、明确标注的上游衍生代码和本轮新增外层；不应描述为从零原创的完整策略。
+The same pattern appeared repeatedly:
 
-最后一层 purchase_timing_agent 以既有策略输出为输入，只有满足受限条件才考虑交换相邻的投入品采购单与固定价格种子单：
+1. **Structural gap:** lagging land, production mix, or early expansion cannot usually be repaired by changing sale order alone.
+2. **Execution gap:** with similar production assets, purchase timing, order queue position, product mix, and final-day liquidation can change a close result.
+3. **Runtime gap:** source parsing, schema compliance, serialization, dependencies, and full-episode completion require independent acceptance checks.
 
-- 当前可见农场布局相似度至少 0.90；
-- 只操作策略原本已经提交的 wheat 或 fertilizer 采购，不新增商品、数量、生产动作或投资决策；
-- 对订单按公开的锁步市场价格机制重新估值；
-- 预测优势超过 20 个游戏币，并保留足够现金余量；
-- 发生异常时保留父策略动作。
+Keeping these gaps separate makes conclusions more reproducible than changing production, market, and packaging simultaneously against one total score.
 
-这是低风险的市场执行改动，设计目标是减少镜像市场中的采购次序损失。它不读取对手隐藏库存、账户身份、种子编号或 episode id，也不试图从固定回放复制动作。
+## 4. Final Agent
 
-代码来源和 Apache-2.0 归属说明保留在文件头及注释中，包含 Kaggle public state-router、Shop Router、若干公开策略组件和 Kaggle 环境规则实现的出处。请在再分发或改写时保留这些说明；上游公开代码的来源不等于本研究对所有旧 replay 数据拥有独立权利。
+The archived [`main.py`](main.py) is byte-identical to the source used for Kaggle submission `56720623`. It is an integration of public strategy components, historical layers, and a new outer layer; it should not be described as a fully original strategy written from scratch.
 
-## 4. 证据与评估边界
+The final callable is `purchase_timing_agent`. It starts with the parent strategy's actions and only considers swapping adjacent input and fixed-price seed orders when all relevant guards pass:
 
-| 证据 | 观察结果 | 能说明什么 | 不能说明什么 |
-|---|---|---|---|
-| Kaggle 提交 56720623 | COMPLETE；public 1662.0，private 4279.6 | 平台确实接受并完成了该提交；这是当前可见赛果 | 单独证明策略普适或某一改动导致全部分数 |
-| 官方环境整局冒烟 | kaggle-environments 1.32.7、720 步，双方 DONE | 入口可加载并运行完整一局 | 不能估计隐藏对手上的胜率 |
-| Kaggle 原始源码解析 | 无 BOM；Python 原始字节编译成功；入口解析为 purchase_timing_agent | 避免曾发生过的 BOM / 入口打包故障 | 不能排除所有线上环境差异 |
-| 对既有在线基线的轨迹反事实 | 重放 34 场败局和 42 场胜局；3 场败局翻正，其余败局不变；原有胜局没有转败，1 场改善 | 该候选在这组记录轨迹上没有观察到回撤 | 轨迹是按旧策略匹配结果选出的，不是独立随机评估 |
-| 官方环境双座位对照 | 对当前策略的 12 个未用种子共 24 局为平局；对其他独立策略的面板多数为正 | 候选在近镜像和部分已测策略上兼容 | 面板规模有限；仍出现过对特定生产结构的大额负差 |
+- visible farm-layout similarity is at least `0.90`;
+- only wheat or fertilizer purchases already present in the parent output may be reordered;
+- no new product, quantity, production action, or investment decision is introduced;
+- the ordered market is revalued under the public lock-step price mechanism;
+- the predicted advantage exceeds 20 game coins and a cash buffer remains;
+- on an exception or inconsistent state, the parent actions are returned unchanged.
 
-更完整的当时逐局分析记录在原工作区，但不随本公开仓库发布。上表只列对解释最终版本所必要的汇总，避免把候选日志误当成独立实验集。
+The design is intentionally conservative. It does not read hidden opponent inventory, account identity, seed number, or episode ID, and it does not replay a fixed episode's action tape.
 
-## 5. 主要经验
+The source retains Apache-2.0 notices and upstream attribution in `main.py`. Preserve those notices when redistributing or modifying the file.
 
-### 生产经济需要联合规划
+## 5. Evaluation Record
 
-应比较完整周期净收益，而不是单位售价：初始采购与土地成本、等待到首产所占天数、维护商品、可用工人动作、收获和搬运能力、仓库容量，以及同商品扩产对价格的反馈都影响回本。资本支出更适合在明确预算、现金缓冲和保守需求情景下评估。
+| Evidence | Observation | Supports | Does not establish |
+| --- | --- | --- | --- |
+| Kaggle submission `56720623` | `COMPLETE`; public `1662.0`, private `4279.6` | The platform accepted and completed this submission; these are the recorded scores | Generality across opponent pools or causality for one edit |
+| Official full-episode smoke test | `kaggle-environments` 1.32.7; 720 steps; both seats `DONE` | The entry point loads and completes a full tested episode | Win rate against hidden opponents |
+| Kaggle-style source parsing | No BOM; raw Python compilation succeeded; callable resolved as `purchase_timing_agent` | Basic packaging and entry-point correctness | All online environment differences |
+| Counterfactual replay on the recorded baseline | 34 losses and 42 wins replayed; 3 losses flipped, other losses unchanged; no prior win became a loss; 1 win improved | No observed regression on this selected trace set | Independent randomized evaluation |
+| Official two-seat comparisons | 24 mirror games over 12 unused seeds were draws; most comparisons against other tested strategies were positive | Compatibility on near-mirror and selected panels | Broad robustness; some production structures still produced large negative margins |
 
-不同商店组合会改变边际需求，但不要看到一个商店就写死一个作物或牲畜数量。后续商店不确定，市场是双方共享的，重复商店也可能出现；同一个生产路线可以在一种后续需求里有效、在另一种需求里亏损。可以用商店作为情景变量，但应同时测试未见过的组合。
+The underlying per-game logs and temporary replay material remain in the private work area and are not part of this repository. The table reports only the evidence needed to interpret the archived version.
 
-### 产能与兑现是不同阶段
+## 6. Lessons for Similar Problems
 
-早期投入没有转化成中期可销售产出，前期现金看起来领先也可能在中后段被反超。相反，拥有库存却没有工人、搬运和出售动作预算，也会让账面产量兑现不了。建议沿时间分段记录现金、资产和可售库存，把差距定位到资本配置、产出、物流或价格执行。
+### Plan complete-cycle economics
 
-### 小幅执行优化不等于结构突破
+Compare full-cycle net return rather than unit price. Include initial purchases and land, time to first output, maintenance inputs, worker actions, harvest and hauling capacity, storage, and price feedback from expanding the same product. Evaluate capital spending against a budget, cash buffer, and conservative demand scenarios.
 
-采购队列的可测改善没有修复所有高产对手造成的结构性差距。记录到的剩余问题包括不同动物组合、额外土地、番茄后期产出和商品销售结构。几个固定化的扩张实验在部分世界造成明显回撤，因此没有加入最终代码。诚实的结论是：该提交在现有证据下是一个较稳的增量改动，但还不是新的生产规划器。
+### Treat capacity and liquidation as different stages
 
-### 评价分数不是诊断
+Early investment may not become saleable output before the middle of the season. Conversely, inventory without workers, hauling, or sale-order budget cannot be realized. Track cash, assets, and saleable inventory by time segment so a gap can be assigned to capital allocation, production, logistics, or price execution.
 
-Kaggle 在线 rating 受匹配池、对手策略和赛程影响；早期分数也会随比赛完成而变化。完整回放可以解释“为什么输”，但若只下载失败局就会引入选择偏差。至少要同时看胜局、平局、独立对手、双座位、不同商店组合和未使用种子。近镜像自博弈适合查找执行差异，不适合单独说明跨策略强度。
+### Do not overfit to one shop configuration
 
-### 工程正确性必须单独把关
+Shops alter marginal demand, but a single observed shop should not hard-code a crop or livestock count. Future shops are uncertain, the market is shared, and repeated shops can occur. Test unseen combinations and use shop composition as a scenario variable rather than a deterministic recipe.
 
-提交前应使用 Kaggle 实际采用的源码解析入口，检查首字节和编码、解析到的最后 callable、返回动作结构、依赖可用性，并执行完整 720 步。此次历史记录里出现过 UTF-8 BOM 造成 Kaggle 原始 compile 报错，而本地 py_compile 未报错；这说明只过本机语法检查不够。代码测试、策略评估和在线排名应分成三张清单。
+### Treat small execution gains as local until proven otherwise
 
-## 6. 遇到类似仿真任务时的工作流
+A measurable purchase-queue gain did not repair structural differences caused by production mix, extra land, late tomato output, or sales structure. Several fixed expansion experiments regressed in some worlds and were excluded. The supported claim is a bounded incremental improvement under the tested evidence, not a new production planner.
 
-1. **核对任务契约。** 阅读当前版本规则、引擎执行顺序、观察 schema、动作 schema、终局条件和评估方法；为高风险机制写最小复现实例。
-2. **建一个透明基线。** 先保证动作合法、运行稳定、记录现金与库存，再优化策略；每轮都保留可回退版本和源码哈希。
-3. **把回放转成事件账本。** 记录生产、维护、买入、卖出、工资、仓储与终局现金。若模拟事件能在官方引擎中逐步复现，优先用重放定位机制，而不是凭总分猜原因。
-4. **提出可证伪假设。** 一次只改变一类机制；给定预期变化、潜在副作用和不通过条件。把回放调参集与未见种子/独立对手分开。
-5. **以风险报告选择候选。** 同时报告样本数、胜平负、均值和最差结果，并按世界特征分层。若新路线只提升均值、却扩大某一常见场景的亏损，应明确权衡。
-6. **先验收完整 agent，再提交。** 保证入口可解析、依赖自包含、无 BOM、序列化合法，完成整局和双方座位测试。在线结果回来后再决定保留哪条分支。
-7. **把结论连同失效条件发布。** 写清楚数据来自哪里、版本是哪一个、哪些是观察事实、哪些只是推断；保留最小必要代码与文档，不把原始账号日志或私人数据公开。
+### Use scores as signals, not diagnoses
 
-这套流程同样适用于市场模拟、资源调度、经营游戏和其他长时域多智能体基准。不同任务的动作含义会变，但“规格核对—事件账本—假设隔离—留出评估—接口验收”的顺序相当通用。
+Online ratings depend on the matching pool, opponent strategies, and schedule. Full replays can explain why a game was lost, but downloading only losses creates selection bias. Include wins, draws, independent opponents, both seats, different shop mixes, and unused seeds. Near-mirror self-play is useful for execution differences, not sufficient for cross-strategy strength.
 
-## 7. 复现信息与参考
+### Validate engineering separately
 
-- 比赛主页：[Kaggle Kaggriculture](https://www.kaggle.com/competitions/kaggriculture)
-- 公开策略来源：[Thomas Tschinkel public state-router](https://www.kaggle.com/code/thomastschinkel/kaggriculture-93-8-win-rate-public-state-router?scriptVersionId=347936183)、[Yusuke Hayashi Shop Router](https://www.kaggle.com/code/yhay81/shop-router-0913)
-- 游戏执行环境：kaggle-environments 1.32.7
-- 源文件 SHA-256：4bb6df2f8bb0e15c1c8e6666dca9102d47c6180c7f6c9407f6b1dd979a1ea5d3
-- Kaggle 提交：56720623；提交描述、源码和归档哈希可在工作区报告中交叉核验。
+Before submission, use the parser and entry-point behavior that the platform actually uses. Check the first bytes and encoding, resolved callable, action schema, dependency availability, serialization, and a complete 720-step run. Local syntax compilation alone can miss a packaging failure such as a UTF-8 BOM.
 
-本仓库只收录最终代码、笔记和许可，不含原始 replay、agent 日志、Kaggle API 凭证或所有权不明的分析数据。
+## 7. Reusable Workflow
+
+1. **Read the contract.** Record the current rules, execution order, observation schema, action schema, terminal condition, and scoring method.
+2. **Build a transparent baseline.** Make actions legal and runs stable before optimizing; retain a rollback version and source hash for every iteration.
+3. **Convert replays into event ledgers.** Record production, maintenance, purchases, sales, wages, storage, and terminal cash. Reproduce events in the official engine where possible.
+4. **State falsifiable hypotheses.** Change one mechanism at a time; define the expected movement, side effects, and rejection conditions. Separate tuning traces from unseen seeds and independent opponents.
+5. **Select by risk report.** Report sample size, win/draw/loss counts, means, worst cases, and strata by world features. Make any mean-versus-tail-risk trade-off explicit.
+6. **Accept the complete agent before submission.** Check parsing, dependencies, BOM, serialization, both seats, and a full episode.
+7. **Publish conclusions with failure conditions.** Label observations versus inferences, identify versions and data sources, and avoid releasing credentials or private logs.
+
+This workflow also applies to market simulators, resource schedulers, management games, and other long-horizon multi-agent benchmarks.
+
+## 8. Reproduction and Sources
+
+- Competition: [Kaggle Kaggriculture](https://www.kaggle.com/competitions/kaggriculture)
+- Public strategy sources retained in the code notices: [Thomas Tschinkel public state-router](https://www.kaggle.com/code/thomastschinkel/kaggriculture-93-8-win-rate-public-state-router?scriptVersionId=347936183) and [Yusuke Hayashi Shop Router](https://www.kaggle.com/code/yhay81/shop-router-0913)
+- Local engine used for validation: `kaggle-environments==1.32.7`
+- Kaggle submission: `56720623`
+- Archived source SHA-256: `4bb6df2f8bb0e15c1c8e6666dca9102d47c6180c7f6c9407f6b1dd979a1ea5d3`
+
+The repository contains the final agent, working notes, and license only. It does not contain raw replays, agent logs, API credentials, or analysis data with unclear ownership.
