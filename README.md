@@ -1,10 +1,8 @@
-# Kaggriculture Agent Research Notes
+# Kaggriculture Agent 工作笔记
 
-一份关于 Kaggriculture 竞赛 agent 的研究归档。这里记录可验证的方法、一个最终提交版本和它的证据边界，不是冠军复盘，也不声称解决了所有强对手。
+一份关于 Kaggriculture 竞赛 agent 的工作笔记，记录问题分析、策略迭代、验证结果和仍待解决的限制，并附一个完整代码版本。
 
 Kaggriculture 是一个双人农场经营模拟：每个 agent 在 30 天、每天 24 个回合中安排工人、作物、牲畜和交易；双方共同影响动态市场，最终按赛季经营结果进行竞赛评价。它不是提示注入或工具攻击赛。
-
-本仓库参考了 [jed-aas-benchmark-notes](https://github.com/FinalSunFlower/jed-aas-benchmark-notes) 的归档方式：公开一份工作笔记和一个完整代码版本，不把临时实验、回放和日志混成结果。
 
 **English index:** Research notes for a Kaggle Kaggriculture farming-simulation agent, covering multi-agent simulation, dynamic markets, replay-based evaluation, risk-aware strategy iteration, and submission validation. The archive contains one submitted Python agent and a Chinese working note.
 
@@ -12,7 +10,7 @@ Kaggriculture 是一个双人农场经营模拟：每个 agent 在 30 天、每�
 
 ## 结果快照
 
-Kaggle CLI 在 2026-10-19 显示，最终提交 56720623 状态为 COMPLETE，public score 为 1662.0，private score 为 4279.6。竞赛列表显示账户 rank 1695 / 10148。这些是平台返回的赛果快照；本文不据此推断奖牌、策略普适性或对其他版本的因果优势。
+Kaggle CLI 在 2026-10-19 显示，提交 56720623 状态为 COMPLETE，public score 为 1662.0，private score 为 4279.6。这是平台返回的赛果快照，不单独说明策略对不同对手或环境都适用，也不能归因某一代码改动带来的全部变化。
 
 最终代码来自这一提交，文件 SHA-256 为 4bb6df2f8bb0e15c1c8e6666dca9102d47c6180c7f6c9407f6b1dd979a1ea5d3。它是对公开策略代码的组合与增量修改，并非完全从零编写；原始代码中的 Apache-2.0 许可和上游出处说明均保留。
 
